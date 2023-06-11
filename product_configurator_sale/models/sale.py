@@ -16,7 +16,7 @@ class SaleOrder(models.Model):
             wizard_model="product.configurator.sale",
             allow_preset_selection=True,
         )
-        return configurator_obj.with_context(ctx).get_wizard_action()
+        return configurator_obj.with_context(**ctx).get_wizard_action()
 
 
 class SaleOrderLine(models.Model):
@@ -47,24 +47,23 @@ class SaleOrderLine(models.Model):
             "product_id": self.product_id.id,
         }
         self = self.with_context(
-            {
-                "default_order_id": self.order_id.id,
-                "default_order_line_id": self.id,
-            }
+            default_order_id=self.order_id.id,
+            default_order_line_id=self.id,
         )
         return self.product_id.product_tmpl_id.create_config_wizard(
             model_name=wizard_model, extra_vals=extra_vals
         )
 
-    @api.onchange("product_uom", "product_uom_qty")
-    def product_uom_change(self):
-        if self.config_session_id:
-            account_tax_obj = self.env["account.tax"]
-            self.price_unit = account_tax_obj._fix_tax_included_price_company(
-                self.config_session_id.price,
-                self.product_id.taxes_id,
-                self.tax_id,
-                self.company_id,
-            )
-        else:
-            super(SaleOrderLine, self).product_uom_change()
+    @api.depends("product_id", "product_uom", "product_uom_qty")
+    def _compute_price_unit(self):
+        for line in self:
+            if line.config_session_id:
+                account_tax_obj = self.env["account.tax"]
+                line.price_unit = account_tax_obj._fix_tax_included_price_company(
+                    line.config_session_id.price,
+                    line.product_id.taxes_id,
+                    line.tax_id,
+                    line.company_id,
+                )
+            else:
+                return super(SaleOrderLine, line)._compute_price_unit()
